@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#050505">
 <link rel="manifest" href="manifest.webmanifest">
 <title>Precious Metals Monitor</title>
+
 <style>
 :root{--g:#39ff88;--d:#8affb4;--b:#246b43;--m:#7c8b80;--e:#ff8f8f;--y:#d7d76b}
 *{box-sizing:border-box}
@@ -25,10 +26,16 @@ button:disabled{opacity:.5}
 .note{color:var(--m);font-size:12px;line-height:1.6;margin-top:18px}
 </style>
 </head>
+
 <body>
+
 <div class="box">
+
   <h1>PRECIOUS METALS MONITOR</h1>
-  <div class="sub">BENGALURU / BANGALORE CITY RATE</div>
+
+  <div class="sub">
+    BENGALURU / BANGALORE CITY RATE
+  </div>
 
   <div class="card">
     <div class="label">GOLD • 24K / 999</div>
@@ -62,7 +69,10 @@ button:disabled{opacity:.5}
     <div class="source">SOURCE: GOODRETURNS • BANGALORE</div>
   </div>
 
-  <button id="refresh" onclick="refreshRates()">REFRESH</button>
+  <button id="refresh" onclick="refreshRates()">
+    REFRESH
+  </button>
+
   <div id="error" class="err"></div>
 
   <div class="note">
@@ -70,91 +80,224 @@ button:disabled{opacity:.5}
     GST, TCS and other levies; a jeweller's final invoice can differ because of taxes,
     making charges, dealer premiums and local spreads.
   </div>
+
 </div>
 
 <script>
-const fallback={
-  gold24:15344,
-  gold22:14065,
-  gold18:11508,
-  silver:245,
-  date:"16 Sep 2026"
+
+const fallback = {
+  gold24: 15344,
+  gold22: 14065,
+  gold18: 11508,
+  silver: 245,
+  updated: "2026-09-16T00:00:00+05:30"
 };
 
-function money(n){return "₹"+Number(n).toLocaleString("en-IN",{maximumFractionDigits:2});}
-
-function render(d, verifiedText){
-  document.getElementById("gold24").textContent=money(d.gold24)+" / g";
-  document.getElementById("gold24w").textContent=money(d.gold24*10)+" / 10 g";
-  document.getElementById("gold22").textContent=money(d.gold22)+" / g";
-  document.getElementById("gold22w").textContent=money(d.gold22*10)+" / 10 g";
-  document.getElementById("gold18").textContent=money(d.gold18)+" / g";
-  document.getElementById("gold18w").textContent=money(d.gold18*10)+" / 10 g";
-  document.getElementById("silver").textContent=money(d.silver)+" / g";
-  document.getElementById("silverw").textContent=money(d.silver*10)+" / 10 g • "+money(d.silver*1000)+" / kg";
-  ["gold24s","gold22s","gold18s","silvers"].forEach(id=>{
-    document.getElementById(id).textContent=verifiedText;
+function money(n) {
+  return "₹" + Number(n).toLocaleString("en-IN", {
+    maximumFractionDigits: 2
   });
 }
 
-async function refreshRates(){
-  const btn=document.getElementById("refresh");
-  const err=document.getElementById("error");
-  btn.disabled=true;
-  err.textContent="Fetching latest Bangalore rates…";
+function formatUpdated(dateString) {
 
-  /*
-    Goodreturns is the source. Because GitHub Pages is a static site and the
-    source page may not permit browser CORS, the page keeps the last verified
-    rates as a safe fallback instead of displaying invented/zero values.
-  */
-  try{
-    const urls=[
-      "https://api.allorigins.win/raw?url="+encodeURIComponent("https://www.goodreturns.in/gold-rates/bangalore.html"),
-      "https://api.allorigins.win/raw?url="+encodeURIComponent("https://www.goodreturns.in/silver-rates/bangalore.html")
-    ];
+  const date = new Date(dateString);
 
-    const [gr,sr]=await Promise.all(urls.map(u=>fetch(u,{cache:"no-store"})));
-    if(!gr.ok || !sr.ok) throw new Error("Live source unavailable ("+(gr.status||sr.status)+")");
+  if (Number.isNaN(date.getTime())) {
+    return "RATE DATA";
+  }
 
-    const goldHtml=await gr.text();
-    const silverHtml=await sr.text();
+  return date.toLocaleString("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "medium",
+    timeZone: "Asia/Kolkata"
+  }) + " IST";
+}
 
-    const clean=s=>s.replace(/\s+/g," ").replace(/&nbsp;/g," ");
-    const g=clean(goldHtml), s=clean(silverHtml);
+function render(d, statusText) {
 
-    const getRate=(text,pattern)=>{
-      const m=text.match(pattern);
-      return m ? Number(m[1].replace(/,/g,"")) : null;
-    };
+  document.getElementById("gold24").textContent =
+    money(d.gold24) + " / g";
 
-    const gold24=getRate(g,/24K Gold\s*\/g[^₹]{0,80}₹\s*([\d,]+(?:\.\d+)?)/i);
-    const gold22=getRate(g,/22K Gold\s*\/g[^₹]{0,80}₹\s*([\d,]+(?:\.\d+)?)/i);
-    const gold18=getRate(g,/18K Gold\s*\/g[^₹]{0,80}₹\s*([\d,]+(?:\.\d+)?)/i);
-    const silver=getRate(s,/Silver\s*\/g[^₹]{0,80}₹\s*([\d,]+(?:\.\d+)?)/i);
+  document.getElementById("gold24w").textContent =
+    money(d.gold24 * 10) + " / 10 g";
 
-    if([gold24,gold22,gold18,silver].some(v=>!Number.isFinite(v))){
-      throw new Error("Source format changed; no price was assumed.");
+  document.getElementById("gold22").textContent =
+    money(d.gold22) + " / g";
+
+  document.getElementById("gold22w").textContent =
+    money(d.gold22 * 10) + " / 10 g";
+
+  document.getElementById("gold18").textContent =
+    money(d.gold18) + " / g";
+
+  document.getElementById("gold18w").textContent =
+    money(d.gold18 * 10) + " / 10 g";
+
+  document.getElementById("silver").textContent =
+    money(d.silver) + " / g";
+
+  document.getElementById("silverw").textContent =
+    money(d.silver * 10) +
+    " / 10 g • " +
+    money(d.silver * 1000) +
+    " / kg";
+
+  document.getElementById("gold24s").textContent =
+    statusText;
+
+  document.getElementById("gold22s").textContent =
+    statusText;
+
+  document.getElementById("gold18s").textContent =
+    statusText;
+
+  document.getElementById("silvers").textContent =
+    statusText;
+}
+
+
+async function refreshRates() {
+
+  const btn = document.getElementById("refresh");
+  const err = document.getElementById("error");
+
+  btn.disabled = true;
+
+  btn.textContent = "UPDATING...";
+
+  err.textContent = "Reading latest verified rates...";
+
+  try {
+
+    /*
+      rates.json is generated automatically by GitHub Actions.
+
+      The timestamp query prevents the browser/CDN from returning
+      an old cached copy.
+    */
+
+    const response = await fetch(
+      "./rates.json?t=" + Date.now(),
+      {
+        cache: "no-store"
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        "rates.json unavailable (" +
+        response.status +
+        ")"
+      );
     }
 
-    const now=new Date().toLocaleString("en-IN",{dateStyle:"medium",timeStyle:"medium",timeZone:"Asia/Kolkata"});
-    render({gold24,gold22,gold18,silver},"LIVE • "+now+" IST");
-    err.textContent="";
-  }catch(e){
-    render(fallback,"LAST VERIFIED • 16 Sep 2026");
-    err.textContent="⚠ Live refresh unavailable. Showing the last verified Goodreturns Bangalore rates.\n"+e.message;
-  }finally{
-    btn.disabled=false;
+    const data = await response.json();
+
+    /*
+      Validate that all four values exist and are numbers.
+    */
+
+    const gold24 = Number(data.gold24);
+    const gold22 = Number(data.gold22);
+    const gold18 = Number(data.gold18);
+    const silver = Number(data.silver);
+
+    if (
+      !Number.isFinite(gold24) ||
+      !Number.isFinite(gold22) ||
+      !Number.isFinite(gold18) ||
+      !Number.isFinite(silver)
+    ) {
+      throw new Error(
+        "Invalid rate data received."
+      );
+    }
+
+    /*
+      Safety checks.
+
+      These prevent accidental values such as:
+      ₹1,40,650/g
+      ₹2,450/g
+    */
+
+    if (
+      gold24 < 10000 ||
+      gold24 > 30000 ||
+      gold22 < 10000 ||
+      gold22 > 30000 ||
+      gold18 < 5000 ||
+      gold18 > 20000 ||
+      gold24 <= gold22 ||
+      gold22 <= gold18 ||
+      silver < 50 ||
+      silver > 1000
+    ) {
+      throw new Error(
+        "Received unexpected metal rates."
+      );
+    }
+
+    const updatedText =
+      formatUpdated(data.updated);
+
+    render(
+      {
+        gold24: gold24,
+        gold22: gold22,
+        gold18: gold18,
+        silver: silver
+      },
+      "LIVE • " + updatedText
+    );
+
+    err.textContent = "";
+
+  } catch (error) {
+
+    /*
+      If rates.json cannot be loaded, keep the last
+      verified values rather than displaying bad data.
+    */
+
+    render(
+      fallback,
+      "LAST VERIFIED • 16 Sep 2026"
+    );
+
+    err.textContent =
+      "⚠ Unable to load latest rates.\n" +
+      error.message;
+
+  } finally {
+
+    btn.disabled = false;
+
+    btn.textContent = "REFRESH";
   }
 }
+
 </script>
+
 <script>
+
 if ("serviceWorker" in navigator) {
+
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=20260917", { updateViaCache: "none" })
-      .catch(() => {});
+
+    navigator.serviceWorker.register(
+      "./sw.js?v=20260917",
+      {
+        updateViaCache: "none"
+      }
+    ).catch(() => {});
+
   });
+
 }
+
 </script>
+
 </body>
 </html>
