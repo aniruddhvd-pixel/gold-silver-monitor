@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#050505">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Precious Metals Monitor</title>
+<style>
+:root{--g:#39ff88;--d:#8affb4;--b:#246b43;--m:#7c8b80;--e:#ff8f8f;--y:#d7d76b}
+*{box-sizing:border-box}
+body{margin:0;background:#050505;color:var(--g);font-family:Consolas,"Courier New",monospace}
+.box{max-width:560px;margin:auto;padding:22px 16px 40px}
+h1{text-align:center;font-size:22px;margin:8px 0 2px;letter-spacing:1px}
+.sub{text-align:center;color:var(--d);font-size:14px;margin-bottom:22px}
+.card{border:1px solid var(--b);border-radius:20px;padding:20px 18px;margin:12px 0;background:#020a04}
+.label{color:var(--d);font-size:16px}
+.price{font-size:32px;margin-top:12px;letter-spacing:1px}
+.small{font-size:15px;margin-top:10px;color:#b9d7c1}
+.status{font-size:12px;color:var(--m);margin-top:14px;line-height:1.6}
+.source{font-size:12px;color:var(--y);margin-top:8px;line-height:1.5}
+button{display:block;width:100%;border:1px solid var(--g);border-radius:14px;background:#031108;color:var(--g);padding:16px;margin-top:14px;font:inherit;font-size:15px}
+button:disabled{opacity:.5}
+.err{color:var(--e);font-size:13px;line-height:1.6;margin-top:12px;white-space:pre-line}
+.note{color:var(--m);font-size:12px;line-height:1.6;margin-top:18px}
+.report-card{border-color:#2b7449}
+.report-title{color:var(--d);font-size:16px}
+.report-meta{color:var(--m);font-size:12px;margin-top:8px}
+.report-price{font-size:23px;margin-top:14px}
+.report-line{font-size:13px;line-height:1.65;color:#b9d7c1;margin-top:8px}
+.report-empty{color:var(--m);font-size:13px;line-height:1.6;margin-top:12px}
+hr{border:0;border-top:1px solid #153e28;margin:16px 0}
+</style>
+</head>
+<body>
+<div class="box">
+<h1>PRECIOUS METALS MONITOR</h1>
+<div class="sub">BENGALURU / BANGALORE CITY RATE</div>
+
+<div class="card">
+  <div class="label">GOLD • 24K / 999</div>
+  <div class="price" id="gold24">Loading...</div>
+  <div class="small" id="gold24w">—</div>
+  <div class="status" id="goldStatus">Loading latest verified rate…</div>
+  <div class="source">SOURCE: GOODRETURNS • BANGALORE</div>
+</div>
+
+<div class="card">
+  <div class="label">GOLD • 22K / 916</div>
+  <div class="price" id="gold22">Loading...</div>
+  <div class="small" id="gold22w">—</div>
+  <div class="status" id="gold22Status">—</div>
+  <div class="source">SOURCE: GOODRETURNS • BANGALORE</div>
+</div>
+
+<div class="card">
+  <div class="label">SILVER • CITY RATE</div>
+  <div class="price" id="silver">Loading...</div>
+  <div class="small" id="silverw">—</div>
+  <div class="status" id="silverStatus">Loading latest verified rate…</div>
+  <div class="source">SOURCE: GOODRETURNS • BANGALORE</div>
+</div>
+
+<div class="card report-card">
+  <div class="report-title">DAILY CHATGPT REPORT ARCHIVE</div>
+
+  <div class="report-meta">10:00 AM REPORT — automatic date selection</div>
+  <div class="report-price" id="r10title">Loading…</div>
+  <div class="report-line" id="r10body">—</div>
+  <button onclick="refreshReports()">↻ REFRESH REPORT ARCHIVE</button>
+
+  <hr>
+
+  <div class="report-meta">04:00 PM REPORT — automatic date selection</div>
+  <div class="report-price" id="r16title">Loading…</div>
+  <div class="report-line" id="r16body">—</div>
+</div>
+
+<button id="refresh" onclick="loadRates()">↻ REFRESH BENGALURU RATES</button>
+<div id="error" class="err"></div>
+
+<div class="note">
+The monitor uses Goodreturns' Bangalore city reference rates for gold and silver.
+The 10 AM / 4 PM panels are stored snapshots from the same source. If you open a
+report before that day's scheduled time, the panel automatically shows the previous
+day's report. After the scheduled time, it shows the current day's report.
+Rates are indicative reference prices; final jeweller invoices can differ because
+of GST, making charges, dealer premiums and local spreads.
+</div>
+</div>
+
+<script>
+const DATA="data/current.json";
+const HISTORY="data/snapshots.json";
+const fmt=n=>new Intl.NumberFormat("en-IN",{maximumFractionDigits:2}).format(n);
+
+function istNow(){
+  return new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata"}));
+}
+function ymd(d){
+  const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),day=String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
+}
+function targetFor(slot){
+  const now=istNow();
+  const minutes=now.getHours()*60+now.getMinutes();
+  const target=slot==="10AM"?600:960;
+  let d=new Date(now);
+  if(minutes<target) d.setDate(d.getDate()-1);
+  return {date:ymd(d),slot};
+}
+function money(n){return "₹"+fmt(n);}
+function renderRate(d){
+  const g24=Number(d.gold24_g),g22=Number(d.gold22_g),s=Number(d.silver_g);
+  document.getElementById("gold24").textContent=money(g24)+" / g";
+  document.getElementById("gold24w").textContent=money(g24*10)+" / 10 g  •  "+money(g24*1000)+" / kg";
+  document.getElementById("gold22").textContent=money(g22)+" / g";
+  document.getElementById("gold22w").textContent=money(g22*10)+" / 10 g  •  "+money(g22*1000)+" / kg";
+  document.getElementById("silver").textContent=money(s)+" / g";
+  document.getElementById("silverw").textContent=money(s*10)+" / 10 g  •  "+money(s*1000)+" / kg";
+  const when=d.fetched_at||d.source_date;
+  const dt=new Date(when);
+  const shown=isNaN(dt)?when:dt.toLocaleString("en-IN",{dateStyle:"medium",timeStyle:"medium",timeZone:"Asia/Kolkata"});
+  document.getElementById("goldStatus").textContent="UPDATED • "+shown+" IST";
+  document.getElementById("gold22Status").textContent="UPDATED • "+shown+" IST";
+  document.getElementById("silverStatus").textContent="UPDATED • "+shown+" IST";
+}
+async function loadRates(){
+  const btn=document.getElementById("refresh"),err=document.getElementById("error");
+  btn.disabled=true;err.textContent="";
+  try{
+    const r=await fetch(DATA+"?v="+Date.now(),{cache:"no-store"});
+    if(!r.ok)throw new Error("rate data HTTP "+r.status);
+    const d=await r.json();
+    renderRate(d);
+  }catch(e){
+    err.textContent="⚠ "+e.message+"\nThe last verified rate remains visible only when cached data exists.";
+  }finally{btn.disabled=false}
+}
+function findSnap(list,slot){
+  const t=targetFor(slot);
+  return list.find(x=>x.date===t.date&&x.slot===slot)||null;
+}
+function renderSnap(s,slot){
+  const prefix=slot==="10AM"?"r10":"r16";
+  const title=document.getElementById(prefix+"title"),body=document.getElementById(prefix+"body");
+  const t=targetFor(slot);
+  if(!s){
+    title.textContent="NO SNAPSHOT YET";
+    body.textContent=`Expected: ${slot==="10AM"?"10:00 AM":"04:00 PM"} IST on ${t.date}. The archive will populate automatically when the scheduled snapshot runs.`;
+    return;
+  }
+  title.textContent=`${s.date} • ${slot}`;
+  body.textContent=`24K ₹${fmt(s.gold24_g)}/g • ₹${fmt(s.gold24_g*10)}/10g\n22K ₹${fmt(s.gold22_g)}/g • ₹${fmt(s.gold22_g*10)}/10g\nSilver ₹${fmt(s.silver_g)}/g • ₹${fmt(s.silver_g*1000)}/kg\nCaptured ${new Date(s.captured_at).toLocaleString("en-IN",{dateStyle:"medium",timeStyle:"medium",timeZone:"Asia/Kolkata"})} IST • SOURCE: GOODRETURNS`;
+}
+async function refreshReports(){
+  try{
+    const r=await fetch(HISTORY+"?v="+Date.now(),{cache:"no-store"});
+    if(!r.ok)throw new Error("snapshot archive HTTP "+r.status);
+    const j=await r.json();
+    const list=Array.isArray(j)?j:(j.snapshots||[]);
+    renderSnap(findSnap(list,"10AM"),"10AM");
+    renderSnap(findSnap(list,"4PM"),"4PM");
+  }catch(e){
+    document.getElementById("r10title").textContent="ARCHIVE UNAVAILABLE";
+    document.getElementById("r16title").textContent="ARCHIVE UNAVAILABLE";
+    document.getElementById("r10body").textContent=e.message;
+    document.getElementById("r16body").textContent=e.message;
+  }
+}
+loadRates();
+refreshReports();
+</script>
+</body>
+</html>
