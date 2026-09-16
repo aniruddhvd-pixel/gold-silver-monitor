@@ -26,13 +26,24 @@ jobs:
           from urllib.request import Request, urlopen
 
           headers = {
-              "User-Agent": "Mozilla/5.0"
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0 Safari/537.36"
           }
 
           def fetch(url):
               req = Request(url, headers=headers)
               with urlopen(req, timeout=30) as response:
+                  if response.status != 200:
+                      raise RuntimeError(f"HTTP {response.status}")
                   return response.read().decode("utf-8", errors="ignore")
+
+          def clean(text):
+              text = re.sub(r"<script.*?</script>", " ", text, flags=re.I | re.S)
+              text = re.sub(r"<style.*?</style>", " ", text, flags=re.I | re.S)
+              text = re.sub(r"<[^>]+>", " ", text)
+              text = text.replace("&nbsp;", " ")
+              text = text.replace("&#8377;", "₹")
+              text = re.sub(r"\s+", " ", text)
+              return text
 
           gold_html = fetch(
               "https://www.goodreturns.in/gold-rates/bangalore.html"
@@ -42,69 +53,81 @@ jobs:
               "https://www.goodreturns.in/silver-rates/bangalore.html"
           )
 
-          def clean(text):
-              text = re.sub(r"<[^>]+>", " ", text)
-              text = text.replace("&nbsp;", " ")
-              text = re.sub(r"\s+", " ", text)
-              return text
-
           gold = clean(gold_html)
           silver = clean(silver_html)
 
-          def get_gold_rate(text, karat):
-              pattern = (
-                  rf"{karat}K\s+Gold\s*/g\s*"
-                  rf"₹\s*([\d,]+(?:\.\d+)?)"
+          # Goodreturns introductory sentence:
+          # ₹15,344 per gram for 24 karat gold
+          # ₹14,065 per gram for 22 karat gold
+          # ₹11,508 per gram for 18 karat gold
+
+          gold_pattern = re.compile(
+              r"₹\s*([\d,]+(?:\.\d+)?)\s*per\s+gram\s+for\s+24\s+karat\s+gold"
+              r".*?"
+              r"₹\s*([\d,]+(?:\.\d+)?)\s*per\s+gram\s+for\s+22\s+karat\s+gold"
+              r".*?"
+              r"₹\s*([\d,]+(?:\.\d+)?)\s*per\s+gram\s+for\s+18\s+karat\s+gold",
+              re.IGNORECASE
+          )
+
+          match = gold_pattern.search(gold)
+
+          if not match:
+              raise RuntimeError(
+                  "Could not find the 24K/22K/18K gold rates in Goodreturns page"
               )
 
-              match = re.search(pattern, text, re.IGNORECASE)
+          gold24 = float(match.group(1).replace(",", ""))
+          gold22 = float(match.group(2).replace(",", ""))
+          gold18 = float(match.group(3).replace(",", ""))
 
-              if not match:
-                  raise RuntimeError(
-                      f"Could not find {karat}K gold rate"
-                  )
+          # Silver introductory sentence:
+          # ₹245 per gram and ₹2,45,000 per kilogram
 
-              return float(
-                  match.group(1).replace(",", "")
+          silver_pattern = re.compile(
+              r"₹\s*([\d,]+(?:\.\d+)?)\s*per\s+gram"
+              r".*?"
+              r"₹\s*([\d,]+(?:\.\d+)?)\s*per\s+kilogram",
+              re.IGNORECASE
+          )
+
+          silver_match = silver_pattern.search(silver)
+
+          if not silver_match:
+              raise RuntimeError(
+                  "Could not find the silver rate in Goodreturns page"
               )
 
-          def get_silver_rate(text):
-              pattern = (
-                  r"Silver\s*/g\s*"
-                  r"₹\s*([\d,]+(?:\.\d+)?)"
+          silver_rate = float(
+              silver_match.group(1).replace(",", "")
+          )
+
+          # Safety checks so incorrect 10g/1kg values are never committed.
+          if not (
+              10000 <= gold24 <= 50000
+              and 10000 <= gold22 <= 50000
+              and 5000 <= gold18 <= 40000
+              and 50 <= silver_rate <= 1000
+              and gold24 > gold22 > gold18
+          ):
+              raise RuntimeError(
+                  f"Unexpected rates detected: "
+                  f"24K={gold24}, 22K={gold22}, "
+                  f"18K={gold18}, silver={silver_rate}"
               )
-
-              match = re.search(
-                  pattern,
-                  text,
-                  re.IGNORECASE
-              )
-
-              if not match:
-                  raise RuntimeError(
-                      "Could not find silver rate"
-                  )
-
-              return float(
-                  match.group(1).replace(",", "")
-              )
-
-          gold24 = get_gold_rate(gold, 24)
-          gold22 = get_gold_rate(gold, 22)
-          gold18 = get_gold_rate(gold, 18)
-          silver = get_silver_rate(silver)
 
           rates = {
               "gold24": gold24,
               "gold22": gold22,
               "gold18": gold18,
-              "silver": silver,
+              "silver": silver_rate,
               "updated": datetime.now(
                   ZoneInfo("Asia/Kolkata")
               ).isoformat()
           }
 
-          print(rates)
+          print("FINAL RATES:")
+          print(json.dumps(rates, indent=2))
 
           with open("rates.json", "w") as f:
               json.dump(rates, f, indent=2)
