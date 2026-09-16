@@ -25,22 +25,63 @@ jobs:
           from zoneinfo import ZoneInfo
           from urllib.request import Request, urlopen
 
-          def fetch(url):
-              req = Request(
-                  url,
-                  headers={
-                      "User-Agent": "Mozilla/5.0"
-                  }
+          HEADERS = {
+              "User-Agent": (
+                  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/140.0 Safari/537.36"
               )
-              with urlopen(req, timeout=60) as response:
+          }
+
+          def fetch(url):
+              request = Request(url, headers=HEADERS)
+
+              with urlopen(request, timeout=60) as response:
                   if response.status != 200:
                       raise RuntimeError(
                           f"HTTP {response.status}"
                       )
+
                   return response.read().decode(
                       "utf-8",
                       errors="ignore"
                   )
+
+          def clean(text):
+              text = text.replace("\r", " ")
+              text = text.replace("\n", " ")
+              text = text.replace("\t", " ")
+              text = text.replace("&nbsp;", " ")
+              text = text.replace("&#8377;", "₹")
+              text = text.replace("&#x20B9;", "₹")
+
+              text = re.sub(
+                  r"<script.*?</script>",
+                  " ",
+                  text,
+                  flags=re.IGNORECASE | re.DOTALL
+              )
+
+              text = re.sub(
+                  r"<style.*?</style>",
+                  " ",
+                  text,
+                  flags=re.IGNORECASE | re.DOTALL
+              )
+
+              text = re.sub(
+                  r"<[^>]+>",
+                  " ",
+                  text
+              )
+
+              text = re.sub(
+                  r"\s+",
+                  " ",
+                  text
+              )
+
+              return text.strip()
 
           gold_url = (
               "https://r.jina.ai/"
@@ -54,110 +95,177 @@ jobs:
               "silver-rates/bangalore.html"
           )
 
-          gold = fetch(gold_url)
-          silver = fetch(silver_url)
+          print("Fetching Goodreturns gold page...")
+          gold_html = fetch(gold_url)
 
-          print("Goodreturns gold page fetched:", len(gold))
-          print("Goodreturns silver page fetched:", len(silver))
+          print("Fetching Goodreturns silver page...")
+          silver_html = fetch(silver_url)
 
-          # Find the Bangalore gold table.
-          gold24_match = re.search(
-              r"Bangalore\s*\|\s*₹?([\d,]+)"
-              r"\s*\|\s*₹?([\d,]+)"
-              r"\s*\|\s*₹?([\d,]+)",
+          gold = clean(gold_html)
+          silver = clean(silver_html)
+
+          print(
+              "Goodreturns gold page fetched:",
+              len(gold)
+          )
+
+          print(
+              "Goodreturns silver page fetched:",
+              len(silver)
+          )
+
+          # --------------------------------------------------
+          # GOLD
+          # --------------------------------------------------
+
+          gold24 = None
+          gold22 = None
+          gold18 = None
+
+          # First try the explicit Goodreturns sentence.
+          gold_sentence = re.search(
+              r"gold price in Bangalore.*?"
+              r"₹\s*([\d,]+(?:\.\d+)?)"
+              r"\s*per\s+gram.*?"
+              r"24\s*karat\s+gold.*?"
+              r"₹\s*([\d,]+(?:\.\d+)?)"
+              r"\s*per\s+gram.*?"
+              r"22\s*karat\s+gold.*?"
+              r"₹\s*([\d,]+(?:\.\d+)?)"
+              r"\s*per\s+gram.*?"
+              r"18\s*karat\s+gold",
               gold,
-              re.IGNORECASE
+              flags=re.IGNORECASE | re.DOTALL
           )
 
-          if not gold24_match:
-              # Fallback: find the three 1-gram values
-              values = re.findall(
-                  r"₹\s*([\d,]+)",
-                  gold
+          if gold_sentence:
+              gold24 = float(
+                  gold_sentence.group(1).replace(",", "")
               )
 
-              numbers = [
-                  int(x.replace(",", ""))
-                  for x in values
-              ]
+              gold22 = float(
+                  gold_sentence.group(2).replace(",", "")
+              )
 
-              candidates = []
+              gold18 = float(
+                  gold_sentence.group(3).replace(",", "")
+              )
 
-              for i in range(len(numbers) - 2):
-                  a, b, c = numbers[i:i+3]
+          # Second method: find the actual /g labels.
+          if gold24 is None:
+              match24 = re.search(
+                  r"24K\s*Gold\s*/g.{0,250}?"
+                  r"₹\s*([\d,]+(?:\.\d+)?)",
+                  gold,
+                  flags=re.IGNORECASE | re.DOTALL
+              )
 
-                  if (
-                      10000 <= a <= 30000
-                      and 10000 <= b <= 30000
-                      and 5000 <= c <= 20000
-                      and a > b > c
-                  ):
-                      candidates.append((a, b, c))
+              match22 = re.search(
+                  r"22K\s*Gold\s*/g.{0,250}?"
+                  r"₹\s*([\d,]+(?:\.\d+)?)",
+                  gold,
+                  flags=re.IGNORECASE | re.DOTALL
+              )
 
-              if not candidates:
-                  raise RuntimeError(
-                      "Could not locate Bangalore gold rates"
+              match18 = re.search(
+                  r"18K\s*Gold\s*/g.{0,250}?"
+                  r"₹\s*([\d,]+(?:\.\d+)?)",
+                  gold,
+                  flags=re.IGNORECASE | re.DOTALL
+              )
+
+              if match24 and match22 and match18:
+                  gold24 = float(
+                      match24.group(1).replace(",", "")
                   )
 
-              gold24, gold22, gold18 = candidates[0]
+                  gold22 = float(
+                      match22.group(1).replace(",", "")
+                  )
 
-          else:
-              gold24 = int(
-                  gold24_match.group(1).replace(",", "")
-              )
-              gold22 = int(
-                  gold24_match.group(2).replace(",", "")
-              )
-              gold18 = int(
-                  gold24_match.group(3).replace(",", "")
+                  gold18 = float(
+                      match18.group(1).replace(",", "")
+                  )
+
+          if gold24 is None:
+              raise RuntimeError(
+                  "Could not locate Bangalore 24K/22K/18K gold rates"
               )
 
-          # Silver: look specifically for the
-          # Silver /g value.
-          silver_match = re.search(
-              r"Silver\s*/g\s*\|\s*₹?\s*([\d,]+)",
+          print("Gold 24K:", gold24)
+          print("Gold 22K:", gold22)
+          print("Gold 18K:", gold18)
+
+          # --------------------------------------------------
+          # SILVER
+          # --------------------------------------------------
+
+          silver_rate = None
+
+          # Look directly after the Silver /g label.
+          silver_per_gram = re.search(
+              r"Silver\s*/g.{0,250}?"
+              r"₹\s*([\d,]+(?:\.\d+)?)",
               silver,
-              re.IGNORECASE
+              flags=re.IGNORECASE | re.DOTALL
           )
 
-          if silver_match:
-              silver_rate = int(
-                  silver_match.group(1).replace(",", "")
-              )
-          else:
-              # Fallback: look for the sentence
-              # describing silver per gram.
-              silver_match = re.search(
-                  r"silver.*?"
-                  r"₹\s*([\d,]+)\s*per\s+gram",
-                  silver,
-                  re.IGNORECASE | re.DOTALL
+          if silver_per_gram:
+              silver_rate = float(
+                  silver_per_gram.group(1).replace(",", "")
               )
 
-              if not silver_match:
-                  raise RuntimeError(
-                      "Could not locate Bangalore silver rate"
+          # Fallback: Goodreturns sentence.
+          if silver_rate is None:
+              silver_sentence = re.search(
+                  r"price\s+of\s+silver\s+in\s+Bangalore"
+                  r".{0,500}?"
+                  r"₹\s*([\d,]+(?:\.\d+)?)"
+                  r"\s*per\s+gram",
+                  silver,
+                  flags=re.IGNORECASE | re.DOTALL
+              )
+
+              if silver_sentence:
+                  silver_rate = float(
+                      silver_sentence.group(1).replace(",", "")
                   )
 
-              silver_rate = int(
-                  silver_match.group(1).replace(",", "")
+          if silver_rate is None:
+              raise RuntimeError(
+                  "Could not locate Bangalore silver rate"
               )
 
-          # Safety checks.
+          print("Silver:", silver_rate)
+
+          # --------------------------------------------------
+          # SAFETY CHECKS
+          # --------------------------------------------------
+
           if not (
               10000 <= gold24 <= 30000
               and 10000 <= gold22 <= 30000
               and 5000 <= gold18 <= 20000
               and gold24 > gold22 > gold18
-              and 50 <= silver_rate <= 1000
           ):
               raise RuntimeError(
-                  "Unexpected values detected: "
+                  "Invalid gold values detected: "
                   f"24K={gold24}, "
                   f"22K={gold22}, "
-                  f"18K={gold18}, "
-                  f"silver={silver_rate}"
+                  f"18K={gold18}"
               )
+
+          if not (
+              50 <= silver_rate <= 1000
+          ):
+              raise RuntimeError(
+                  "Invalid silver value detected: "
+                  f"{silver_rate}"
+              )
+
+          # --------------------------------------------------
+          # CREATE rates.json
+          # --------------------------------------------------
 
           rates = {
               "gold24": gold24,
@@ -169,18 +277,32 @@ jobs:
               ).isoformat()
           }
 
-          print("FINAL RATES:")
+          print("")
+          print("================================")
+          print("FINAL RATES")
+          print("================================")
           print(json.dumps(rates, indent=2))
+          print("================================")
 
-          with open("rates.json", "w") as f:
-              json.dump(rates, f, indent=2)
-              f.write("\n")
+          with open("rates.json", "w") as file:
+              json.dump(
+                  rates,
+                  file,
+                  indent=2
+              )
+              file.write("\n")
+
+          print("rates.json created successfully")
           PY
 
       - name: Commit updated rates
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add rates.json
-          git diff --cached --quiet || git commit -m "Update metal rates"
+
+          git diff --cached --quiet || \
+            git commit -m "Update metal rates"
+
           git push
