@@ -19,101 +19,144 @@ jobs:
       - name: Fetch Goodreturns rates
         run: |
           python - <<'PY'
-          import re
           import json
+          import re
           from datetime import datetime
           from zoneinfo import ZoneInfo
           from urllib.request import Request, urlopen
 
-          headers = {
-              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0 Safari/537.36"
-          }
-
           def fetch(url):
-              req = Request(url, headers=headers)
-              with urlopen(req, timeout=30) as response:
+              req = Request(
+                  url,
+                  headers={
+                      "User-Agent": "Mozilla/5.0"
+                  }
+              )
+              with urlopen(req, timeout=60) as response:
                   if response.status != 200:
-                      raise RuntimeError(f"HTTP {response.status}")
-                  return response.read().decode("utf-8", errors="ignore")
+                      raise RuntimeError(
+                          f"HTTP {response.status}"
+                      )
+                  return response.read().decode(
+                      "utf-8",
+                      errors="ignore"
+                  )
 
-          def clean(text):
-              text = re.sub(r"<script.*?</script>", " ", text, flags=re.I | re.S)
-              text = re.sub(r"<style.*?</style>", " ", text, flags=re.I | re.S)
-              text = re.sub(r"<[^>]+>", " ", text)
-              text = text.replace("&nbsp;", " ")
-              text = text.replace("&#8377;", "₹")
-              text = re.sub(r"\s+", " ", text)
-              return text
-
-          gold_html = fetch(
-              "https://www.goodreturns.in/gold-rates/bangalore.html"
+          gold_url = (
+              "https://r.jina.ai/"
+              "https://www.goodreturns.in/"
+              "gold-rates/bangalore.html"
           )
 
-          silver_html = fetch(
-              "https://www.goodreturns.in/silver-rates/bangalore.html"
+          silver_url = (
+              "https://r.jina.ai/"
+              "https://www.goodreturns.in/"
+              "silver-rates/bangalore.html"
           )
 
-          gold = clean(gold_html)
-          silver = clean(silver_html)
+          gold = fetch(gold_url)
+          silver = fetch(silver_url)
 
-          # Goodreturns introductory sentence:
-          # ₹15,344 per gram for 24 karat gold
-          # ₹14,065 per gram for 22 karat gold
-          # ₹11,508 per gram for 18 karat gold
+          print("Goodreturns gold page fetched:", len(gold))
+          print("Goodreturns silver page fetched:", len(silver))
 
-          gold_pattern = re.compile(
-              r"₹\s*([\d,]+(?:\.\d+)?)\s*per\s+gram\s+for\s+24\s+karat\s+gold"
-              r".*?"
-              r"₹\s*([\d,]+(?:\.\d+)?)\s*per\s+gram\s+for\s+22\s+karat\s+gold"
-              r".*?"
-              r"₹\s*([\d,]+(?:\.\d+)?)\s*per\s+gram\s+for\s+18\s+karat\s+gold",
+          # Find the Bangalore gold table.
+          gold24_match = re.search(
+              r"Bangalore\s*\|\s*₹?([\d,]+)"
+              r"\s*\|\s*₹?([\d,]+)"
+              r"\s*\|\s*₹?([\d,]+)",
+              gold,
               re.IGNORECASE
           )
 
-          match = gold_pattern.search(gold)
-
-          if not match:
-              raise RuntimeError(
-                  "Could not find the 24K/22K/18K gold rates in Goodreturns page"
+          if not gold24_match:
+              # Fallback: find the three 1-gram values
+              values = re.findall(
+                  r"₹\s*([\d,]+)",
+                  gold
               )
 
-          gold24 = float(match.group(1).replace(",", ""))
-          gold22 = float(match.group(2).replace(",", ""))
-          gold18 = float(match.group(3).replace(",", ""))
+              numbers = [
+                  int(x.replace(",", ""))
+                  for x in values
+              ]
 
-          # Silver introductory sentence:
-          # ₹245 per gram and ₹2,45,000 per kilogram
+              candidates = []
 
-          silver_pattern = re.compile(
-              r"₹\s*([\d,]+(?:\.\d+)?)\s*per\s+gram"
-              r".*?"
-              r"₹\s*([\d,]+(?:\.\d+)?)\s*per\s+kilogram",
+              for i in range(len(numbers) - 2):
+                  a, b, c = numbers[i:i+3]
+
+                  if (
+                      10000 <= a <= 30000
+                      and 10000 <= b <= 30000
+                      and 5000 <= c <= 20000
+                      and a > b > c
+                  ):
+                      candidates.append((a, b, c))
+
+              if not candidates:
+                  raise RuntimeError(
+                      "Could not locate Bangalore gold rates"
+                  )
+
+              gold24, gold22, gold18 = candidates[0]
+
+          else:
+              gold24 = int(
+                  gold24_match.group(1).replace(",", "")
+              )
+              gold22 = int(
+                  gold24_match.group(2).replace(",", "")
+              )
+              gold18 = int(
+                  gold24_match.group(3).replace(",", "")
+              )
+
+          # Silver: look specifically for the
+          # Silver /g value.
+          silver_match = re.search(
+              r"Silver\s*/g\s*\|\s*₹?\s*([\d,]+)",
+              silver,
               re.IGNORECASE
           )
 
-          silver_match = silver_pattern.search(silver)
-
-          if not silver_match:
-              raise RuntimeError(
-                  "Could not find the silver rate in Goodreturns page"
+          if silver_match:
+              silver_rate = int(
+                  silver_match.group(1).replace(",", "")
+              )
+          else:
+              # Fallback: look for the sentence
+              # describing silver per gram.
+              silver_match = re.search(
+                  r"silver.*?"
+                  r"₹\s*([\d,]+)\s*per\s+gram",
+                  silver,
+                  re.IGNORECASE | re.DOTALL
               )
 
-          silver_rate = float(
-              silver_match.group(1).replace(",", "")
-          )
+              if not silver_match:
+                  raise RuntimeError(
+                      "Could not locate Bangalore silver rate"
+                  )
 
-          # Safety checks so incorrect 10g/1kg values are never committed.
+              silver_rate = int(
+                  silver_match.group(1).replace(",", "")
+              )
+
+          # Safety checks.
           if not (
-              10000 <= gold24 <= 50000
-              and 10000 <= gold22 <= 50000
-              and 5000 <= gold18 <= 40000
-              and 50 <= silver_rate <= 1000
+              10000 <= gold24 <= 30000
+              and 10000 <= gold22 <= 30000
+              and 5000 <= gold18 <= 20000
               and gold24 > gold22 > gold18
+              and 50 <= silver_rate <= 1000
           ):
               raise RuntimeError(
-                  f"Unexpected rates detected: "
-                  f"24K={gold24}, 22K={gold22}, "
-                  f"18K={gold18}, silver={silver_rate}"
+                  "Unexpected values detected: "
+                  f"24K={gold24}, "
+                  f"22K={gold22}, "
+                  f"18K={gold18}, "
+                  f"silver={silver_rate}"
               )
 
           rates = {
