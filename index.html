@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#050505">
+<meta name="description" content="Live 24K gold and 999 silver monitor">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<title>Gold & Silver Monitor</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#050505;color:#39ff88;font-family:Consolas,monospace;padding:18px;min-height:100vh}
+.box{max-width:520px;margin:auto;border:1px solid #39ff88;padding:18px;border-radius:12px;box-shadow:0 0 18px #0b2515}
+h1{font-size:20px;text-align:center;margin:0 0 18px}
+.card{border:1px solid #246b43;border-radius:10px;padding:15px;margin:12px 0}
+.label{font-size:12px;color:#8affb4;letter-spacing:.5px}
+.price{font-size:29px;margin-top:7px}
+.sub{font-size:14px;margin-top:7px;color:#b7ffc9}
+.change{font-size:13px;margin-top:8px}
+button{width:100%;background:#07150d;color:#39ff88;border:1px solid #39ff88;border-radius:8px;padding:13px;margin-top:10px;font:inherit}
+.status{font-size:12px;color:#9db6a4;margin-top:12px;line-height:1.5}
+.error{color:#ff9b9b}
+small{display:block;color:#7f9b88;margin-top:15px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="box">
+<h1>PRECIOUS METALS MONITOR</h1>
+
+<div class="card">
+  <div class="label">GOLD • 24K / 999 • INR</div>
+  <div class="price" id="gold">Loading…</div>
+  <div class="sub" id="gold10">—</div>
+  <div class="change" id="goldChange">—</div>
+</div>
+
+<div class="card">
+  <div class="label">SILVER • 999 • INR</div>
+  <div class="price" id="silver">Loading…</div>
+  <div class="sub" id="silverKg">—</div>
+  <div class="change" id="silverChange">—</div>
+</div>
+
+<div class="card">
+  <div class="label">DAILY CHATGPT REPORTS</div>
+  <button onclick="openChat()">🕙 10:00 AM REPORT</button>
+  <button onclick="openChat()">🕓 04:00 PM REPORT</button>
+</div>
+
+<button onclick="loadPrices()">↻ REFRESH PRICES</button>
+<div class="status" id="status">Fetching live reference prices…</div>
+
+<small>
+Prices are indicative live spot/reference prices, not guaranteed Bengaluru retail/dealer quotes.
+Physical bullion may differ because of GST, premiums and dealer spreads.
+Data source: XAUS. Refresh is cached by the provider for about 30 seconds.
+</small>
+</div>
+
+<script>
+const API='https://xaus.com/api/v1/spot?currency=INR&unit=gram';
+
+function money(n, decimals=2){
+  return '₹' + Number(n).toLocaleString('en-IN',{minimumFractionDigits:decimals,maximumFractionDigits:decimals});
+}
+function openChat(){ window.open('https://chatgpt.com/','_blank'); }
+
+async function loadPrices(){
+  const status=document.getElementById('status');
+  status.className='status';
+  status.textContent='Fetching live reference prices…';
+  try{
+    const r=await fetch(API,{cache:'no-store'});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d=await r.json();
+
+    // XAUS returns XAU in the requested currency/unit and XAG as silver spot.
+    const gold=d.xau?.price;
+    const silver=d.xag?.price ?? d.silver?.price;
+    if(typeof gold!=='number' || typeof silver!=='number') throw new Error('Unexpected API response');
+
+    document.getElementById('gold').textContent=money(gold,2)+' / g';
+    document.getElementById('gold10').textContent=money(gold*10,2)+' / 10 g';
+    document.getElementById('silver').textContent=money(silver,2)+' / g';
+    document.getElementById('silverKg').textContent=money(silver*1000,2)+' / kg';
+
+    const goldCh=d.xau?.change_percent;
+    const silverCh=d.xag?.change_percent ?? d.silver?.change_percent;
+    document.getElementById('goldChange').textContent=
+      typeof goldCh==='number' ? `24h: ${goldCh>=0?'▲':'▼'} ${Math.abs(goldCh).toFixed(2)}%` : 'Live spot reference';
+    document.getElementById('silverChange').textContent=
+      typeof silverCh==='number' ? `24h: ${silverCh>=0?'▲':'▼'} ${Math.abs(silverCh).toFixed(2)}%` : 'Live spot reference';
+
+    const when=d.updated_at || d.price_as_of;
+    status.textContent='LIVE • Updated '+(when?new Date(when).toLocaleString('en-IN'):'just now');
+  }catch(e){
+    status.className='status error';
+    status.textContent='Live price fetch failed. Check your connection and tap Refresh.';
+  }
+}
+loadPrices();
+setInterval(loadPrices,60000);
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js'));
+}
+</script>
+</body>
+</html>
