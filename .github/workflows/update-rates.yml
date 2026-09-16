@@ -24,172 +24,221 @@ jobs:
           from datetime import datetime
           from zoneinfo import ZoneInfo
           from urllib.request import Request, urlopen
+          from html.parser import HTMLParser
 
           HEADERS = {
               "User-Agent": (
                   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                   "AppleWebKit/537.36 (KHTML, like Gecko) "
                   "Chrome/140.0 Safari/537.36"
-              )
+              ),
+              "Accept": (
+                  "text/html,application/xhtml+xml,"
+                  "application/xml;q=0.9,*/*;q=0.8"
+              ),
+              "Accept-Language": "en-US,en;q=0.9",
+              "Referer": "https://www.google.com/"
           }
 
           def fetch(url):
               request = Request(url, headers=HEADERS)
 
-              with urlopen(request, timeout=60) as response:
-                  if response.status != 200:
-                      raise RuntimeError(
-                          f"HTTP {response.status}"
-                      )
+              for attempt in range(3):
+                  try:
+                      with urlopen(request, timeout=45) as response:
+                          if response.status != 200:
+                              raise RuntimeError(
+                                  f"HTTP {response.status}"
+                              )
 
-                  return response.read().decode(
-                      "utf-8",
-                      errors="ignore"
-                  )
+                          return response.read().decode(
+                              "utf-8",
+                              errors="ignore"
+                          )
 
-          def clean(text):
-              text = text.replace("\r", " ")
-              text = text.replace("\n", " ")
-              text = text.replace("\t", " ")
-              text = text.replace("&nbsp;", " ")
-              text = text.replace("&#8377;", "₹")
-              text = text.replace("&#x20B9;", "₹")
+                  except Exception as error:
+                      if attempt == 2:
+                          raise RuntimeError(
+                              f"Unable to fetch Goodreturns: {error}"
+                          )
 
-              text = re.sub(
-                  r"<script.*?</script>",
-                  " ",
+          class TableParser(HTMLParser):
+
+              def __init__(self):
+                  super().__init__()
+                  self.tables = []
+                  self.current_table = None
+                  self.current_row = None
+                  self.current_cell = None
+                  self.cell_text = []
+
+              def handle_starttag(self, tag, attrs):
+
+                  if tag == "table":
+                      self.current_table = []
+
+                  elif tag == "tr" and self.current_table is not None:
+                      self.current_row = []
+
+                  elif tag in ("td", "th") and self.current_row is not None:
+                      self.current_cell = []
+                      self.cell_text = []
+
+              def handle_data(self, data):
+
+                  if self.current_cell is not None:
+                      self.cell_text.append(data)
+
+              def handle_endtag(self, tag):
+
+                  if tag in ("td", "th"):
+                      if (
+                          self.current_cell is not None
+                          and self.current_row is not None
+                      ):
+                          text = " ".join(
+                              self.cell_text
+                          )
+
+                          text = re.sub(
+                              r"\s+",
+                              " ",
+                              text
+                          ).strip()
+
+                          self.current_row.append(text)
+
+                      self.current_cell = None
+                      self.cell_text = []
+
+                  elif tag == "tr":
+                      if (
+                          self.current_row is not None
+                          and self.current_table is not None
+                      ):
+                          if self.current_row:
+                              self.current_table.append(
+                                  self.current_row
+                              )
+
+                      self.current_row = None
+
+                  elif tag == "table":
+                      if self.current_table is not None:
+                          self.tables.append(
+                              self.current_table
+                          )
+
+                      self.current_table = None
+
+          def rupee_number(text):
+              match = re.search(
+                  r"(?:₹|Rs\.?|INR)\s*"
+                  r"([\d,]+(?:\.\d+)?)",
                   text,
-                  flags=re.IGNORECASE | re.DOTALL
+                  re.IGNORECASE
               )
 
-              text = re.sub(
-                  r"<style.*?</style>",
-                  " ",
-                  text,
-                  flags=re.IGNORECASE | re.DOTALL
+              if not match:
+                  return None
+
+              return float(
+                  match.group(1).replace(",", "")
               )
 
-              text = re.sub(
-                  r"<[^>]+>",
-                  " ",
-                  text
-              )
+          # --------------------------------------------------
+          # FETCH
+          # --------------------------------------------------
 
-              text = re.sub(
-                  r"\s+",
-                  " ",
-                  text
-              )
+          print("Fetching Goodreturns gold page...")
 
-              return text.strip()
-
-          gold_url = (
-              "https://r.jina.ai/"
+          gold_html = fetch(
               "https://www.goodreturns.in/"
               "gold-rates/bangalore.html"
           )
 
-          silver_url = (
-              "https://r.jina.ai/"
+          print(
+              "Gold page fetched:",
+              len(gold_html),
+              "characters"
+          )
+
+          print("Fetching Goodreturns silver page...")
+
+          silver_html = fetch(
               "https://www.goodreturns.in/"
               "silver-rates/bangalore.html"
           )
 
-          print("Fetching Goodreturns gold page...")
-          gold_html = fetch(gold_url)
-
-          print("Fetching Goodreturns silver page...")
-          silver_html = fetch(silver_url)
-
-          gold = clean(gold_html)
-          silver = clean(silver_html)
-
           print(
-              "Goodreturns gold page fetched:",
-              len(gold)
-          )
-
-          print(
-              "Goodreturns silver page fetched:",
-              len(silver)
+              "Silver page fetched:",
+              len(silver_html),
+              "characters"
           )
 
           # --------------------------------------------------
-          # GOLD
+          # PARSE GOLD TABLES
           # --------------------------------------------------
+
+          gold_parser = TableParser()
+          gold_parser.feed(gold_html)
 
           gold24 = None
           gold22 = None
           gold18 = None
 
-          # First try the explicit Goodreturns sentence.
-          gold_sentence = re.search(
-              r"gold price in Bangalore.*?"
-              r"₹\s*([\d,]+(?:\.\d+)?)"
-              r"\s*per\s+gram.*?"
-              r"24\s*karat\s+gold.*?"
-              r"₹\s*([\d,]+(?:\.\d+)?)"
-              r"\s*per\s+gram.*?"
-              r"22\s*karat\s+gold.*?"
-              r"₹\s*([\d,]+(?:\.\d+)?)"
-              r"\s*per\s+gram.*?"
-              r"18\s*karat\s+gold",
-              gold,
-              flags=re.IGNORECASE | re.DOTALL
-          )
+          for table in gold_parser.tables:
 
-          if gold_sentence:
-              gold24 = float(
-                  gold_sentence.group(1).replace(",", "")
-              )
+              for row in table:
 
-              gold22 = float(
-                  gold_sentence.group(2).replace(",", "")
-              )
+                  if not row:
+                      continue
 
-              gold18 = float(
-                  gold_sentence.group(3).replace(",", "")
-              )
+                  # We specifically want the 1 gram row.
+                  first = row[0].strip()
 
-          # Second method: find the actual /g labels.
-          if gold24 is None:
-              match24 = re.search(
-                  r"24K\s*Gold\s*/g.{0,250}?"
-                  r"₹\s*([\d,]+(?:\.\d+)?)",
-                  gold,
-                  flags=re.IGNORECASE | re.DOTALL
-              )
+                  if first != "1":
+                      continue
 
-              match22 = re.search(
-                  r"22K\s*Gold\s*/g.{0,250}?"
-                  r"₹\s*([\d,]+(?:\.\d+)?)",
-                  gold,
-                  flags=re.IGNORECASE | re.DOTALL
-              )
+                  numbers = []
 
-              match18 = re.search(
-                  r"18K\s*Gold\s*/g.{0,250}?"
-                  r"₹\s*([\d,]+(?:\.\d+)?)",
-                  gold,
-                  flags=re.IGNORECASE | re.DOTALL
-              )
+                  for cell in row[1:]:
+                      value = rupee_number(cell)
 
-              if match24 and match22 and match18:
-                  gold24 = float(
-                      match24.group(1).replace(",", "")
-                  )
+                      if value is not None:
+                          numbers.append(value)
 
-                  gold22 = float(
-                      match22.group(1).replace(",", "")
-                  )
+                  # The correct gold row has:
+                  # 24K, 22K, 18K
+                  #
+                  # Example:
+                  # 1 | ₹15,344 (+27) |
+                  # ₹14,065 (+25) |
+                  # ₹11,508 (+20)
 
-                  gold18 = float(
-                      match18.group(1).replace(",", "")
-                  )
+                  if len(numbers) >= 3:
+
+                      a = numbers[0]
+                      b = numbers[1]
+                      c = numbers[2]
+
+                      if (
+                          10000 <= a <= 30000
+                          and 10000 <= b <= 30000
+                          and 5000 <= c <= 20000
+                          and a > b > c
+                      ):
+                          gold24 = a
+                          gold22 = b
+                          gold18 = c
+                          break
+
+              if gold24 is not None:
+                  break
 
           if gold24 is None:
               raise RuntimeError(
-                  "Could not locate Bangalore 24K/22K/18K gold rates"
+                  "Could not find the 1 gram gold table row"
               )
 
           print("Gold 24K:", gold24)
@@ -197,49 +246,54 @@ jobs:
           print("Gold 18K:", gold18)
 
           # --------------------------------------------------
-          # SILVER
+          # PARSE SILVER TABLE
           # --------------------------------------------------
+
+          silver_parser = TableParser()
+          silver_parser.feed(silver_html)
 
           silver_rate = None
 
-          # Look directly after the Silver /g label.
-          silver_per_gram = re.search(
-              r"Silver\s*/g.{0,250}?"
-              r"₹\s*([\d,]+(?:\.\d+)?)",
-              silver,
-              flags=re.IGNORECASE | re.DOTALL
-          )
+          for table in silver_parser.tables:
 
-          if silver_per_gram:
-              silver_rate = float(
-                  silver_per_gram.group(1).replace(",", "")
-              )
+              for row in table:
 
-          # Fallback: Goodreturns sentence.
-          if silver_rate is None:
-              silver_sentence = re.search(
-                  r"price\s+of\s+silver\s+in\s+Bangalore"
-                  r".{0,500}?"
-                  r"₹\s*([\d,]+(?:\.\d+)?)"
-                  r"\s*per\s+gram",
-                  silver,
-                  flags=re.IGNORECASE | re.DOTALL
-              )
+                  if not row:
+                      continue
 
-              if silver_sentence:
-                  silver_rate = float(
-                      silver_sentence.group(1).replace(",", "")
-                  )
+                  # Silver table has:
+                  #
+                  # 1 | ₹245 | ₹245 | 0
+                  #
+                  # We want the first cell = 1.
+
+                  if row[0].strip() != "1":
+                      continue
+
+                  if len(row) < 2:
+                      continue
+
+                  value = rupee_number(row[1])
+
+                  if value is None:
+                      continue
+
+                  if 50 <= value <= 1000:
+                      silver_rate = value
+                      break
+
+              if silver_rate is not None:
+                  break
 
           if silver_rate is None:
               raise RuntimeError(
-                  "Could not locate Bangalore silver rate"
+                  "Could not find the 1 gram silver table row"
               )
 
           print("Silver:", silver_rate)
 
           # --------------------------------------------------
-          # SAFETY CHECKS
+          # FINAL SAFETY CHECK
           # --------------------------------------------------
 
           if not (
@@ -250,21 +304,18 @@ jobs:
           ):
               raise RuntimeError(
                   "Invalid gold values detected: "
-                  f"24K={gold24}, "
-                  f"22K={gold22}, "
-                  f"18K={gold18}"
+                  f"{gold24}, {gold22}, {gold18}"
               )
 
           if not (
               50 <= silver_rate <= 1000
           ):
               raise RuntimeError(
-                  "Invalid silver value detected: "
-                  f"{silver_rate}"
+                  f"Invalid silver value detected: {silver_rate}"
               )
 
           # --------------------------------------------------
-          # CREATE rates.json
+          # WRITE rates.json
           # --------------------------------------------------
 
           rates = {
@@ -278,11 +329,16 @@ jobs:
           }
 
           print("")
-          print("================================")
+          print("==============================")
           print("FINAL RATES")
-          print("================================")
-          print(json.dumps(rates, indent=2))
-          print("================================")
+          print("==============================")
+          print(
+              json.dumps(
+                  rates,
+                  indent=2
+              )
+          )
+          print("==============================")
 
           with open("rates.json", "w") as file:
               json.dump(
