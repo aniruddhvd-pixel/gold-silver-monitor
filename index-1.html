@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#050505">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Bengaluru Gold & Silver Monitor</title>
+<style>
+:root{--g:#39ff88;--d:#8affb4;--b:#246b43;--m:#7f9b88;--r:#ff9a9a;--y:#d8ff75}
+*{box-sizing:border-box}body{margin:0;background:#050505;color:var(--g);font-family:Consolas,"Courier New",monospace;padding:18px}
+.box{max-width:560px;margin:auto;border:1px solid var(--g);border-radius:14px;padding:18px}
+h1{text-align:center;font-size:21px;margin:0 0 5px}.place{text-align:center;color:var(--d);font-size:13px;margin-bottom:18px;letter-spacing:.5px}
+.card{border:1px solid var(--b);border-radius:12px;padding:16px;margin:12px 0;background:#030603}.label{font-size:13px;color:var(--d)}
+.price{font-size:31px;margin-top:9px}.sub{font-size:14px;color:#b7ffc9;margin-top:8px;line-height:1.5}
+.status{font-size:12px;color:var(--m);margin-top:9px;line-height:1.45}.source{font-size:11px;color:var(--y);margin-top:5px}
+button,a{display:block;width:100%;background:#06110a;color:var(--g);border:1px solid var(--g);border-radius:9px;padding:13px;margin-top:10px;font:inherit;text-align:center;text-decoration:none}
+button:disabled{opacity:.6}.error{color:var(--r);line-height:1.5;margin-top:12px;min-height:20px}small{display:block;color:var(--m);margin-top:15px;line-height:1.55}
+</style>
+</head>
+<body>
+<div class="box">
+<h1>PRECIOUS METALS MONITOR</h1>
+<div class="place">INDIA BENCHMARK / IBJA</div>
+
+<div class="card">
+<div class="label">GOLD • 24K / 999</div>
+<div class="price" id="gold">Loading…</div>
+<div class="sub" id="goldSub">—</div>
+<div class="status" id="goldStatus">Fetching latest IBJA India benchmark rate…</div>
+<div class="source">SOURCE: India Bullion & Jewellers Association (IBJA)</div>
+</div>
+
+<div class="card">
+<div class="label">GOLD • 22K</div>
+<div class="price" id="gold22">Loading…</div>
+<div class="sub" id="gold22Sub">—</div>
+</div>
+
+<div class="card">
+<div class="label">SILVER • 999</div>
+<div class="price" id="silver">Loading…</div>
+<div class="sub" id="silverSub">—</div>
+<div class="status" id="silverStatus">—</div>
+<div class="source">SOURCE: India Bullion & Jewellers Association (IBJA)</div>
+</div>
+
+<div class="card">
+<div class="label">DAILY CHATGPT REPORTS</div>
+<a href="https://chatgpt.com/" target="_blank" rel="noopener">🕙 10:00 AM REPORT</a>
+<a href="https://chatgpt.com/" target="_blank" rel="noopener">🕓 04:00 PM REPORT</a>
+</div>
+
+<button id="refreshBtn" onclick="loadPrices()">↻ REFRESH IBJA RATES</button>
+<div class="error" id="error"></div>
+
+<small>
+This monitor uses the latest published Karnataka market rates from IBJA. Refresh fetches the current IBJA page and extracts its published rates.<br><br>
+IBJA rates are benchmark rates and are published without 3% GST and making charges. Jewellery dealer premiums, making charges and buy/sell spreads can differ by city and jeweller.<br><br>
+If IBJA changes its webpage format or the proxy is temporarily unavailable, the app will show an error instead of inventing a price.
+</small>
+</div>
+
+<script>
+const SOURCE="https://ibjarates.com/";
+const READER="https://r.jina.ai/https://ibjarates.com/";
+const money=v=>new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:2}).format(v);
+function nowIST(){return new Date().toLocaleString("en-IN",{timeZone:"Asia/Kolkata",year:"numeric",month:"short",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:true})+" IST";}
+function clean(s){return String(s).replace(/[,₹*]/g,"").trim();}
+function parseIBJA(text){
+  // IBJA Rates publishes the current benchmark table as Gold 999/995/916/etc.
+  // Rates are per 10g for gold and per 1kg for silver, excluding GST.
+  const lines=text.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  let gold999=NaN,gold916=NaN,silver999=NaN;
+  for(const line of lines){
+    const low=line.toLowerCase();
+    const nums=(line.match(/\d+(?:,\d+)*(?:\.\d+)?/g)||[]).map(x=>Number(clean(x)));
+    if(low.includes("gold 999") && nums.length>=2){gold999=nums[nums.length-1];}
+    if(low.includes("gold 916") && nums.length>=2){gold916=nums[nums.length-1];}
+    if(low.includes("silver 999") && nums.length>=2){silver999=nums[nums.length-1];}
+  }
+  // Fallback: parse the first data row in a markdown table if labels are on separate lines.
+  if(!Number.isFinite(gold999)||!Number.isFinite(gold916)||!Number.isFinite(silver999)){
+    const m=text.match(/Gold\s+999\s*\|\s*([\d,]+)\s*\|\s*([\d,]*)[\s\S]{0,1200}?Silver\s+999\s*\|\s*([\d,]+)\s*\|\s*([\d,]*)/i);
+    if(m){gold999=Number(clean(m[2]||m[1]));}
+    const g=text.match(/Gold\s+916\s*\|\s*([\d,]+)\s*\|\s*([\d,]+)/i); if(g) gold916=Number(clean(g[2]));
+    const si=text.match(/Silver\s+999\s*\|\s*([\d,]+)\s*\|\s*([\d,]+)/i); if(si) silver999=Number(clean(si[2]));
+  }
+  return {gold999,gold916,silver999};
+}
+async function loadPrices(){
+ const btn=document.getElementById("refreshBtn"),err=document.getElementById("error");
+ btn.disabled=true;btn.textContent="↻ FETCHING IBJA…";err.textContent="";
+ try{
+   const res=await fetch(READER+"?fresh="+Date.now(),{cache:"no-store",headers:{Accept:"text/plain"}});
+   if(!res.ok) throw new Error("IBJA source fetch failed (HTTP "+res.status+")");
+   const text=await res.text();
+   const {gold999,gold916,silver999}=parseIBJA(text);
+   if(!Number.isFinite(gold999)||!Number.isFinite(gold916)||!Number.isFinite(silver999)) throw new Error("IBJA page format changed; no price was assumed.");
+   const silver=silver999/1000;
+   const gold999g=gold999/10, gold916g=gold916/10;
+   document.getElementById("gold").textContent=money(gold999g)+" / g";
+   document.getElementById("goldSub").textContent=money(gold999)+" / 10 g  •  "+money(gold999g*1000)+" / kg";
+   document.getElementById("gold22").textContent=money(gold916g)+" / g";
+   document.getElementById("gold22Sub").textContent=money(gold916)+" / 10 g  •  "+money(gold916g*1000)+" / kg";
+   document.getElementById("silver").textContent=money(silver)+" / g";
+   document.getElementById("silverSub").textContent=money(silver*10)+" / 10 g  •  "+money(silver999)+" / kg";
+   document.getElementById("goldStatus").textContent="LATEST IBJA BENCHMARK • fetched "+nowIST();
+   document.getElementById("silverStatus").textContent="LATEST IBJA BENCHMARK • fetched "+nowIST();
+ }catch(e){err.textContent="⚠ "+e.message+" Try REFRESH again in a moment.";}
+ finally{btn.disabled=false;btn.textContent="↻ REFRESH IBJA RATES";}
+}
+loadPrices();
+</script>
+</body>
+</html>
