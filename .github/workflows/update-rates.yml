@@ -34,8 +34,13 @@ jobs:
               with urlopen(req, timeout=30) as response:
                   return response.read().decode("utf-8", errors="ignore")
 
-          gold = fetch("https://www.goodreturns.in/gold-rates/bangalore.html")
-          silver = fetch("https://www.goodreturns.in/silver-rates/bangalore.html")
+          gold_html = fetch(
+              "https://www.goodreturns.in/gold-rates/bangalore.html"
+          )
+
+          silver_html = fetch(
+              "https://www.goodreturns.in/silver-rates/bangalore.html"
+          )
 
           def clean(text):
               text = re.sub(r"<[^>]+>", " ", text)
@@ -43,21 +48,57 @@ jobs:
               text = re.sub(r"\s+", " ", text)
               return text
 
-          gold = clean(gold)
-          silver = clean(silver)
+          gold = clean(gold_html)
+          silver = clean(silver_html)
 
-          def get_rate(text, label):
-              pattern = label + r"\s*/g.*?₹\s*([\d,]+(?:\.\d+)?)"
+          def get_gold_rate(text, karat):
+              pattern = (
+                  rf"{karat}K\s+Gold\s*/g\s*"
+                  rf"₹\s*([\d,]+(?:\.\d+)?)"
+              )
+
               match = re.search(pattern, text, re.IGNORECASE)
+
               if not match:
-                  raise RuntimeError("Could not find " + label)
-              return float(match.group(1).replace(",", ""))
+                  raise RuntimeError(
+                      f"Could not find {karat}K gold rate"
+                  )
+
+              return float(
+                  match.group(1).replace(",", "")
+              )
+
+          def get_silver_rate(text):
+              pattern = (
+                  r"Silver\s*/g\s*"
+                  r"₹\s*([\d,]+(?:\.\d+)?)"
+              )
+
+              match = re.search(
+                  pattern,
+                  text,
+                  re.IGNORECASE
+              )
+
+              if not match:
+                  raise RuntimeError(
+                      "Could not find silver rate"
+                  )
+
+              return float(
+                  match.group(1).replace(",", "")
+              )
+
+          gold24 = get_gold_rate(gold, 24)
+          gold22 = get_gold_rate(gold, 22)
+          gold18 = get_gold_rate(gold, 18)
+          silver = get_silver_rate(silver)
 
           rates = {
-              "gold24": get_rate(gold, "24K Gold"),
-              "gold22": get_rate(gold, "22K Gold"),
-              "gold18": get_rate(gold, "18K Gold"),
-              "silver": get_rate(silver, "Silver"),
+              "gold24": gold24,
+              "gold22": gold22,
+              "gold18": gold18,
+              "silver": silver,
               "updated": datetime.now(
                   ZoneInfo("Asia/Kolkata")
               ).isoformat()
