@@ -1,0 +1,79 @@
+name: Update Gold Silver Rates
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-rates:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fetch Goodreturns rates
+        run: |
+          python - <<'PY'
+          import re
+          import json
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          from urllib.request import Request, urlopen
+
+          headers = {
+              "User-Agent": "Mozilla/5.0"
+          }
+
+          def fetch(url):
+              req = Request(url, headers=headers)
+              with urlopen(req, timeout=30) as response:
+                  return response.read().decode("utf-8", errors="ignore")
+
+          gold = fetch("https://www.goodreturns.in/gold-rates/bangalore.html")
+          silver = fetch("https://www.goodreturns.in/silver-rates/bangalore.html")
+
+          def clean(text):
+              text = re.sub(r"<[^>]+>", " ", text)
+              text = text.replace("&nbsp;", " ")
+              text = re.sub(r"\s+", " ", text)
+              return text
+
+          gold = clean(gold)
+          silver = clean(silver)
+
+          def get_rate(text, label):
+              pattern = label + r"\s*/g.*?₹\s*([\d,]+(?:\.\d+)?)"
+              match = re.search(pattern, text, re.IGNORECASE)
+              if not match:
+                  raise RuntimeError("Could not find " + label)
+              return float(match.group(1).replace(",", ""))
+
+          rates = {
+              "gold24": get_rate(gold, "24K Gold"),
+              "gold22": get_rate(gold, "22K Gold"),
+              "gold18": get_rate(gold, "18K Gold"),
+              "silver": get_rate(silver, "Silver"),
+              "updated": datetime.now(
+                  ZoneInfo("Asia/Kolkata")
+              ).isoformat()
+          }
+
+          print(rates)
+
+          with open("rates.json", "w") as f:
+              json.dump(rates, f, indent=2)
+              f.write("\n")
+          PY
+
+      - name: Commit updated rates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add rates.json
+          git diff --cached --quiet || git commit -m "Update metal rates"
+          git push
