@@ -292,7 +292,9 @@ if ("serviceWorker" in navigator) {
         updateViaCache: "none"
       }
     ).catch(() => {});
-
+    
+    refreshRates();
+    
   });
 
 }
